@@ -44,11 +44,13 @@ else
 fi
 
 # 5. Detectar los LLMs de LM Studio y elegir el modelo por defecto
-# (el código va con -c, no por stdin, para que input() pueda leer al usuario)
+# Python solo lista y aplica; todas las lecturas de teclado las hace bash
+# (si Python leyera stdin, su buffer se tragaría las respuestas siguientes).
 SELECT_MODEL_PY="$(cat <<'PYEOF'
 import json, re, sys, urllib.request
 
-env_path = sys.argv[1]
+cmd, env_path = sys.argv[1], sys.argv[2]
+choice = sys.argv[3].strip() if len(sys.argv) > 3 else ""
 text = open(env_path).read()
 
 def get(key, default=""):
@@ -60,30 +62,31 @@ current = get("MODEL_ID")
 try:
     with urllib.request.urlopen(f"{root}/api/v0/models", timeout=5) as r:
         data = json.load(r)["data"]
+    models = [m for m in data if m.get("type") in ("llm", "vlm")]
 except Exception:
-    print("  · LM Studio no responde (¿servidor apagado?). Configura MODEL_ID en .env cuando quieras.")
+    models = None
+
+if models is None or not models:
+    if cmd == "list":
+        if models is None:
+            print("  · LM Studio no responde (¿servidor apagado?). Configura MODEL_ID en .env cuando quieras.")
+        else:
+            print("  · LM Studio no tiene LLMs descargados todavía; configura MODEL_ID en .env más tarde.")
+    sys.exit(1)
+
+if cmd == "list":
+    print("\n  Modelos LLM detectados en tu LM Studio:")
+    for i, m in enumerate(models, 1):
+        notes = []
+        if "tool_use" not in m.get("capabilities", []):
+            notes.append("sin tool calling: NO recomendado")
+        if m["id"] == current:
+            notes.append("actual")
+        extra = f"  ({', '.join(notes)})" if notes else ""
+        print(f"   {i:>2}. {m['id']}  [ctx {m.get('max_context_length', '?')}]{extra}")
     sys.exit(0)
 
-models = [m for m in data if m.get("type") in ("llm", "vlm")]
-if not models:
-    print("  · LM Studio no tiene LLMs descargados todavía; configura MODEL_ID en .env más tarde.")
-    sys.exit(0)
-
-print("\n  Modelos LLM detectados en tu LM Studio:")
-for i, m in enumerate(models, 1):
-    notes = []
-    if "tool_use" not in m.get("capabilities", []):
-        notes.append("sin tool calling: NO recomendado")
-    if m["id"] == current:
-        notes.append("actual")
-    extra = f"  ({', '.join(notes)})" if notes else ""
-    print(f"   {i:>2}. {m['id']}  [ctx {m.get('max_context_length', '?')}]{extra}")
-
-try:
-    choice = input(f"\n  ¿Cuál usar por defecto? [1-{len(models)}, Enter = mantener actual] ").strip()
-except EOFError:
-    choice = ""
-
+# cmd == "apply"
 if choice.isdigit() and 1 <= int(choice) <= len(models):
     chosen = models[int(choice) - 1]["id"]
     if re.search(r"^MODEL_ID=", text, re.M):
@@ -96,9 +99,36 @@ else:
     print(f"  \033[32m✓\033[0m Se mantiene MODEL_ID={current or '(plantilla)'}")
 PYEOF
 )"
-"${AGENT_DIR}/.venv/bin/python" -c "${SELECT_MODEL_PY}" "${AGENT_DIR}/.env"
+if "${AGENT_DIR}/.venv/bin/python" -c "${SELECT_MODEL_PY}" list "${AGENT_DIR}/.env"; then
+    printf '\n  ¿Cuál usar por defecto? [número, Enter = mantener actual] '
+    read -r MODEL_CHOICE || MODEL_CHOICE=""
+    "${AGENT_DIR}/.venv/bin/python" -c "${SELECT_MODEL_PY}" apply "${AGENT_DIR}/.env" "${MODEL_CHOICE}"
+fi
 
-# 6. Comando global
+# 6. TAVILY_API_KEY (opcional, habilita la búsqueda web)
+CURRENT_TAVILY="$(grep -E '^TAVILY_API_KEY=' "${AGENT_DIR}/.env" | head -1 | cut -d= -f2- | tr -d '[:space:]')"
+if [ -n "${CURRENT_TAVILY}" ]; then
+    ok "TAVILY_API_KEY ya configurada (búsqueda web activa)"
+else
+    echo
+    info "Búsqueda web (opcional): consigue una API key gratuita en https://www.tavily.com/"
+    printf '  Pega tu TAVILY_API_KEY [Enter para omitir]: '
+    read -r TAVILY_KEY || TAVILY_KEY=""
+    TAVILY_KEY="$(printf '%s' "${TAVILY_KEY}" | tr -d '[:space:]')"
+    if [ -n "${TAVILY_KEY}" ]; then
+        if grep -qE '^TAVILY_API_KEY=' "${AGENT_DIR}/.env"; then
+            sed -i "s|^TAVILY_API_KEY=.*|TAVILY_API_KEY=${TAVILY_KEY}|" "${AGENT_DIR}/.env"
+        else
+            printf 'TAVILY_API_KEY=%s\n' "${TAVILY_KEY}" >> "${AGENT_DIR}/.env"
+        fi
+        CURRENT_TAVILY="${TAVILY_KEY}"
+        ok "TAVILY_API_KEY guardada en .env (búsqueda web activa)"
+    else
+        info "Omitida; el agente funcionará sin búsqueda web."
+    fi
+fi
+
+# 7. Comando global
 mkdir -p "${BIN_DIR}"
 cat > "${LAUNCHER}" <<EOF
 #!/usr/bin/env bash
@@ -108,7 +138,7 @@ EOF
 chmod +x "${LAUNCHER}"
 ok "Comando instalado en ${LAUNCHER}"
 
-# 7. ¿Está ~/.local/bin en el PATH?
+# 8. ¿Está ~/.local/bin en el PATH?
 case ":${PATH}:" in
     *":${BIN_DIR}:"*)
         ok "~/.local/bin ya está en tu PATH"
@@ -137,7 +167,10 @@ case ":${PATH}:" in
 esac
 
 echo
-echo "Instalación completa. Pasos siguientes:"
-echo "  1. Opcional: pon tu TAVILY_API_KEY en ${AGENT_DIR}/.env para la búsqueda web"
-echo "  2. Con el servidor de LM Studio activo (Developer → Start Server), ejecuta:  local_agent"
+echo "Instalación completa."
+if [ -z "${CURRENT_TAVILY}" ]; then
+    echo "  · Recuerda: sin TAVILY_API_KEY el agente no puede buscar en internet."
+    echo "    Consíguela gratis en https://www.tavily.com/ y pégala en ${AGENT_DIR}/.env"
+fi
+echo "  · Con el servidor de LM Studio activo (Developer → Start Server), ejecuta:  local_agent"
 echo

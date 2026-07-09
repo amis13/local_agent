@@ -44,6 +44,27 @@ if ARGS.workspace:
 if ARGS.yes:
     os.environ["AUTO_APPROVE"] = "1"
 
+# Los imports pesados (SDK, openai, rich) tardan varios segundos; mientras,
+# un spinner en un hilo aparte avisa de que el agente está arrancando.
+import itertools
+import threading
+
+_loading = threading.Event()
+_spinner_thread = None
+
+
+def _spinner():
+    for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
+        if _loading.wait(0.1):
+            break
+        print(f"\r\033[2m{ch} cargando agente…\033[0m", end="", flush=True)
+    print("\r\033[K", end="", flush=True)
+
+
+if sys.stdout.isatty():
+    _spinner_thread = threading.Thread(target=_spinner, daemon=True)
+    _spinner_thread.start()
+
 # tools lee WORKSPACE/AUTO_APPROVE del entorno: importar después de fijarlos
 import requests
 from openai import AsyncOpenAI
@@ -71,6 +92,10 @@ from rich.console import Console
 from rich.panel import Panel
 
 import tools
+
+_loading.set()
+if _spinner_thread:
+    _spinner_thread.join(timeout=1)
 
 BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
 LMSTUDIO_ROOT = BASE_URL.rsplit("/v1", 1)[0]

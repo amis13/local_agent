@@ -38,12 +38,11 @@ cd local_agent
 
 El instalador crea el entorno virtual, instala las dependencias, genera tu
 `.env` a partir de la plantilla, **detecta los LLMs de tu LM Studio y te
-pregunta cuál usar por defecto**, y deja el comando global `local_agent` en
+pregunta cuál usar por defecto**, te pide (opcional) tu `TAVILY_API_KEY`
+para la búsqueda web, y deja el comando global `local_agent` en
 `~/.local/bin` (avisa si esa carpeta no está en tu PATH). Es idempotente:
 puedes relanzarlo cuando quieras (p. ej. tras un `git pull` o para cambiar
 el modelo por defecto).
-
-Después, si quieres búsqueda web, pon tu `TAVILY_API_KEY` en `.env`.
 
 <details>
 <summary>Instalación manual (sin install.sh)</summary>
