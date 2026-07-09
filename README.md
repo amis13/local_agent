@@ -33,26 +33,31 @@ tú › arregla el test que falla y explícame por qué fallaba
 ```bash
 git clone https://github.com/<tu-usuario>/local_agent.git
 cd local_agent
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp .env.example .env    # edita MODEL_ID y (opcional) TAVILY_API_KEY
+./install.sh
 ```
 
-### Comando global `local_agent` (opcional)
+El instalador crea el entorno virtual, instala las dependencias, genera tu
+`.env` a partir de la plantilla y deja el comando global `local_agent` en
+`~/.local/bin` (avisa si esa carpeta no está en tu PATH). Es idempotente:
+puedes relanzarlo cuando quieras (p. ej. tras un `git pull`).
 
-Para invocarlo desde cualquier carpeta, crea un lanzador en tu PATH:
+Después edita `.env` con tu `MODEL_ID` y, si quieres búsqueda web, tu
+`TAVILY_API_KEY`.
+
+<details>
+<summary>Instalación manual (sin install.sh)</summary>
 
 ```bash
-cat > ~/.local/bin/local_agent <<EOF
-#!/usr/bin/env bash
-AGENT_DIR="$(pwd)"
-exec "\$AGENT_DIR/.venv/bin/python" "\$AGENT_DIR/agent.py" "\$@"
-EOF
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env
+# lanzador global opcional (desde la raíz del repo):
+printf '#!/usr/bin/env bash\nexec "%s/.venv/bin/python" "%s/agent.py" "$@"\n' \
+    "$(pwd)" "$(pwd)" > ~/.local/bin/local_agent
 chmod +x ~/.local/bin/local_agent
 ```
 
-(Ejecútalo desde la raíz del repositorio clonado; `$(pwd)` queda grabado como
-ruta del agente.)
+</details>
 
 ## Uso
 
