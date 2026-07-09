@@ -1,0 +1,5 @@
+openai-agents
+python-dotenv
+rich
+requests
+beautifulsoup4

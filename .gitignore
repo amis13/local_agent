@@ -1,0 +1,12 @@
+# Entorno y dependencias
+.venv/
+__pycache__/
+*.py[cod]
+
+# Secretos (la clave de Tavily vive aquí; usa .env.example como plantilla)
+.env
+
+# Configuración local de herramientas
+.claude/
+.vscode/
+.idea/
