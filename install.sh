@@ -43,7 +43,62 @@ else
     ok "Ya existe .env (no se toca)"
 fi
 
-# 5. Comando global
+# 5. Detectar los LLMs de LM Studio y elegir el modelo por defecto
+# (el código va con -c, no por stdin, para que input() pueda leer al usuario)
+SELECT_MODEL_PY="$(cat <<'PYEOF'
+import json, re, sys, urllib.request
+
+env_path = sys.argv[1]
+text = open(env_path).read()
+
+def get(key, default=""):
+    m = re.search(rf"^{key}=(.*)$", text, re.M)
+    return m.group(1).strip() if m else default
+
+root = get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1").rsplit("/v1", 1)[0]
+current = get("MODEL_ID")
+try:
+    with urllib.request.urlopen(f"{root}/api/v0/models", timeout=5) as r:
+        data = json.load(r)["data"]
+except Exception:
+    print("  · LM Studio no responde (¿servidor apagado?). Configura MODEL_ID en .env cuando quieras.")
+    sys.exit(0)
+
+models = [m for m in data if m.get("type") in ("llm", "vlm")]
+if not models:
+    print("  · LM Studio no tiene LLMs descargados todavía; configura MODEL_ID en .env más tarde.")
+    sys.exit(0)
+
+print("\n  Modelos LLM detectados en tu LM Studio:")
+for i, m in enumerate(models, 1):
+    notes = []
+    if "tool_use" not in m.get("capabilities", []):
+        notes.append("sin tool calling: NO recomendado")
+    if m["id"] == current:
+        notes.append("actual")
+    extra = f"  ({', '.join(notes)})" if notes else ""
+    print(f"   {i:>2}. {m['id']}  [ctx {m.get('max_context_length', '?')}]{extra}")
+
+try:
+    choice = input(f"\n  ¿Cuál usar por defecto? [1-{len(models)}, Enter = mantener actual] ").strip()
+except EOFError:
+    choice = ""
+
+if choice.isdigit() and 1 <= int(choice) <= len(models):
+    chosen = models[int(choice) - 1]["id"]
+    if re.search(r"^MODEL_ID=", text, re.M):
+        text = re.sub(r"^MODEL_ID=.*$", f"MODEL_ID={chosen}", text, count=1, flags=re.M)
+    else:
+        text += f"\nMODEL_ID={chosen}\n"
+    open(env_path, "w").write(text)
+    print(f"  \033[32m✓\033[0m Modelo por defecto: {chosen}")
+else:
+    print(f"  \033[32m✓\033[0m Se mantiene MODEL_ID={current or '(plantilla)'}")
+PYEOF
+)"
+"${AGENT_DIR}/.venv/bin/python" -c "${SELECT_MODEL_PY}" "${AGENT_DIR}/.env"
+
+# 6. Comando global
 mkdir -p "${BIN_DIR}"
 cat > "${LAUNCHER}" <<EOF
 #!/usr/bin/env bash
@@ -53,7 +108,7 @@ EOF
 chmod +x "${LAUNCHER}"
 ok "Comando instalado en ${LAUNCHER}"
 
-# 6. ¿Está ~/.local/bin en el PATH?
+# 7. ¿Está ~/.local/bin en el PATH?
 case ":${PATH}:" in
     *":${BIN_DIR}:"*)
         ok "~/.local/bin ya está en tu PATH"
@@ -83,7 +138,6 @@ esac
 
 echo
 echo "Instalación completa. Pasos siguientes:"
-echo "  1. Edita ${AGENT_DIR}/.env  →  MODEL_ID y (opcional) TAVILY_API_KEY"
-echo "  2. Arranca el servidor de LM Studio (Developer → Start Server)"
-echo "  3. Ejecuta:  local_agent"
+echo "  1. Opcional: pon tu TAVILY_API_KEY en ${AGENT_DIR}/.env para la búsqueda web"
+echo "  2. Con el servidor de LM Studio activo (Developer → Start Server), ejecuta:  local_agent"
 echo
