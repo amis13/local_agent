@@ -33,7 +33,7 @@ tú › arregla el test que falla y explícame por qué fallaba
 ```bash
 git clone https://github.com/<tu-usuario>/local_agent.git
 cd local_agent
-./install.sh
+chmod +x install.sh && ./install.sh
 ```
 
 El instalador crea el entorno virtual, instala las dependencias, genera tu
